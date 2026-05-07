@@ -160,6 +160,12 @@
     #send-btn:hover    { background: var(--primary-d); }
     #send-btn:disabled { background: var(--border); cursor: not-allowed; }
     .chat-hint { font-size: 12px; color: var(--muted); text-align: center; margin-top: 8px; max-width: 820px; margin: 8px auto 0; }
+    .no-tool-warn {
+      display: none; align-items: center; gap: 8px; max-width: 820px; margin: 8px auto 0;
+      background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px;
+      padding: 8px 14px; font-size: 13px; color: #92400e;
+    }
+    .no-tool-warn.visible { display: flex; }
 
     /* ── Extract tab ── */
     #tab-extract { padding: 20px; overflow: auto; }
@@ -261,7 +267,10 @@
       <textarea id="msg-input" rows="1" placeholder="Message… (Enter to send, Shift+Enter for newline)"></textarea>
       <button id="send-btn">Send →</button>
     </div>
-    <p class="chat-hint">Tool calling active on: claude-*, llama-3.3-70b-versatile, grok-2-*</p>
+    <p class="chat-hint" id="chat-hint"></p>
+    <div class="no-tool-warn" id="no-tool-warn">
+      ⚠️ <span>This model doesn't support tool calling — weather questions will get a generic answer. Switch to <strong>llama-3.3-70b-versatile</strong>, <strong>grok-2-latest</strong>, or any <strong>claude-*</strong> model for live weather data.</span>
+    </div>
   </div>
 </div>
 
@@ -301,6 +310,29 @@ Examples:
 </div>
 
 <script>
+// ── Model capability awareness ─────────────────────────────────────────────
+const TOOL_MODELS = new Set([
+  'claude-sonnet-4-6', 'claude-haiku-4-5-20251001',
+  'llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'llama3-70b-8192',
+  'grok-2-latest', 'grok-2-mini-latest', 'grok-beta',
+]);
+
+const modelSelect  = document.getElementById('model-select');
+const chatHint     = document.getElementById('chat-hint');
+const noToolWarn   = document.getElementById('no-tool-warn');
+
+function updateModelHint() {
+  const m = modelSelect.value;
+  const hasTools = TOOL_MODELS.has(m);
+  chatHint.textContent = hasTools
+    ? `🔧 Tool calling active — ${m} will fetch live weather data`
+    : `💬 Chat only — ${m} has no tool calling`;
+  noToolWarn.classList.toggle('visible', !hasTools);
+}
+
+modelSelect.addEventListener('change', updateModelHint);
+updateModelHint(); // run on page load
+
 // ── Tab switching ──────────────────────────────────────────────────────────
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
