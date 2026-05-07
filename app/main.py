@@ -13,7 +13,7 @@ ROOT = Path(__file__).parent.parent   # repo root, works regardless of cwd
 FRONTEND = ROOT / "frontend"
 
 app = FastAPI(
-    title="AI Engineering Journey",
+    title="Synapse — Just a First AI",
     description=(
         "FastAPI service with streaming chat (SSE + tool calling) "
         "and structured extraction via instructor + Pydantic."

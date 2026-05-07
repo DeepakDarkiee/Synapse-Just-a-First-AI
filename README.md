@@ -1,4 +1,4 @@
-# AI Engineering Journey
+# Synapse — Just a First AI
 
 FastAPI service with:
 - **Streaming chat** (SSE) using Claude or Groq — with automatic weather tool calling

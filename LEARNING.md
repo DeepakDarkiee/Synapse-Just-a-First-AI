@@ -1,4 +1,4 @@
-# Learning Guide — AI Engineering Journey
+# Learning Guide — Synapse: Just a First AI
 
 This file explains **what** was built, **why** each decision was made, and **how** the key patterns work. Read it alongside the code. Every section links to the relevant file.
 
