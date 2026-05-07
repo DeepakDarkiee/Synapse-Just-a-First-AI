@@ -50,6 +50,11 @@ You need at least one LLM key. Both have free tiers.
 2. Go to **API Keys** → **Create API Key**
 3. Copy the key — it starts with `gsk_`
 
+### xAI Grok — free tier available
+1. Sign up at [console.x.ai](https://console.x.ai)
+2. Go to **API Keys** → **Create API Key**
+3. Copy the key — it starts with `xai-`
+
 > The weather tool uses [wttr.in](https://wttr.in) — **no API key needed**.
 
 ---
@@ -282,6 +287,9 @@ Your service will be live at `https://ai-engineering-journey.fly.dev`.
 | `llama-3.1-8b-instant` | Groq (free) | No | Very fast |
 | `mixtral-8x7b-32768` | Groq (free) | No | Fast |
 | `gemma2-9b-it` | Groq (free) | No | Fast |
+| `grok-2-latest` | xAI | Yes | Fast |
+| `grok-2-mini-latest` | xAI | Yes | Fast |
+| `grok-beta` | xAI | Yes | Fast |
 
 ---
 

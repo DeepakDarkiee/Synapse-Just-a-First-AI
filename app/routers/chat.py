@@ -4,6 +4,7 @@ from typing import AsyncGenerator
 
 import anthropic
 from groq import AsyncGroq
+from openai import AsyncOpenAI
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -12,20 +13,29 @@ from app.tools.weather import WEATHER_TOOL_DEFINITION, get_weather
 
 router = APIRouter()
 
+# ── Provider routing ───────────────────────────────────────────────────────
+
+# Models whose prefix routes to each provider
+_GROQ_PREFIXES = ("llama", "mixtral", "gemma", "whisper")
+_XAI_PREFIXES  = ("grok",)
+
+# Models (across OpenAI-compat providers) that support tool/function calling
+_TOOL_CAPABLE_MODELS = {
+    # Groq
+    "llama-3.3-70b-versatile",
+    "llama-3.1-70b-versatile",
+    "llama3-70b-8192",
+    # xAI Grok
+    "grok-2-latest",
+    "grok-2-mini-latest",
+    "grok-beta",
+}
+
 # ── Lazy singletons ────────────────────────────────────────────────────────
 
 _anthropic_client: anthropic.AsyncAnthropic | None = None
 _groq_client: AsyncGroq | None = None
-
-# Groq models that support tool / function calling
-_GROQ_TOOL_MODELS = {
-    "llama-3.3-70b-versatile",
-    "llama-3.1-70b-versatile",
-    "llama3-70b-8192",
-}
-
-# Models whose prefix routes to Groq
-_GROQ_PREFIXES = ("llama", "mixtral", "gemma", "whisper")
+_xai_client: AsyncOpenAI | None = None
 
 
 def _get_anthropic() -> anthropic.AsyncAnthropic:
@@ -46,6 +56,16 @@ def _get_groq() -> AsyncGroq:
             raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
         _groq_client = AsyncGroq(api_key=key)
     return _groq_client
+
+
+def _get_xai() -> AsyncOpenAI:
+    global _xai_client
+    if _xai_client is None:
+        key = os.getenv("XAI_API_KEY")
+        if not key:
+            raise HTTPException(status_code=500, detail="XAI_API_KEY not configured")
+        _xai_client = AsyncOpenAI(api_key=key, base_url="https://api.x.ai/v1")
+    return _xai_client
 
 
 # ── Anthropic / Claude ─────────────────────────────────────────────────────
@@ -108,10 +128,10 @@ async def _stream_claude(req: ChatRequest) -> AsyncGenerator[str, None]:
     yield _sse("done", {})
 
 
-# ── Groq ───────────────────────────────────────────────────────────────────
+# ── OpenAI-compatible (Groq + xAI) ────────────────────────────────────────
 
-# Groq uses the OpenAI tool format — convert our Anthropic definition once.
-_GROQ_WEATHER_TOOL = {
+# Both Groq and xAI use the OpenAI tool format — convert our definition once.
+_OAI_WEATHER_TOOL = {
     "type": "function",
     "function": {
         "name": WEATHER_TOOL_DEFINITION["name"],
@@ -121,24 +141,22 @@ _GROQ_WEATHER_TOOL = {
 }
 
 
-async def _stream_groq(req: ChatRequest) -> AsyncGenerator[str, None]:
-    client = _get_groq()
-    supports_tools = req.model in _GROQ_TOOL_MODELS
+async def _stream_openai_compat(
+    client: AsyncGroq | AsyncOpenAI,
+    req: ChatRequest,
+) -> AsyncGenerator[str, None]:
+    """Shared streaming loop for any OpenAI-compatible provider (Groq, xAI)."""
+    supports_tools = req.model in _TOOL_CAPABLE_MODELS
     messages = [
         {"role": "system", "content": req.system},
         {"role": "user", "content": req.message},
     ]
 
-    kwargs: dict = dict(
-        model=req.model,
-        max_tokens=req.max_tokens,
-        messages=messages,
-        stream=True,
-    )
+    kwargs: dict = dict(model=req.model, max_tokens=req.max_tokens, messages=messages, stream=True)
     if supports_tools:
-        kwargs["tools"] = [_GROQ_WEATHER_TOOL]
+        kwargs["tools"] = [_OAI_WEATHER_TOOL]
 
-    # Accumulate tool call fields across streamed chunks
+    # Accumulate tool-call fields across streamed chunks
     tool_call_id: str | None = None
     tool_call_name: str | None = None
     tool_call_args = ""
@@ -178,10 +196,7 @@ async def _stream_groq(req: ChatRequest) -> AsyncGenerator[str, None]:
                     {
                         "id": tool_call_id,
                         "type": "function",
-                        "function": {
-                            "name": tool_call_name,
-                            "arguments": tool_call_args,
-                        },
+                        "function": {"name": tool_call_name, "arguments": tool_call_args},
                     }
                 ],
             },
@@ -193,10 +208,7 @@ async def _stream_groq(req: ChatRequest) -> AsyncGenerator[str, None]:
         ]
 
         stream2 = await client.chat.completions.create(
-            model=req.model,
-            max_tokens=req.max_tokens,
-            messages=messages,
-            stream=True,
+            model=req.model, max_tokens=req.max_tokens, messages=messages, stream=True
         )
         async for chunk in stream2:
             delta = chunk.choices[0].delta
@@ -226,13 +238,14 @@ async def chat(req: ChatRequest):
     """
     Streaming chat endpoint (SSE).
 
-    Supports **Claude** (Anthropic) and **Groq** models. Automatically
-    calls the weather tool when the user asks about weather.
+    Supports **Claude** (Anthropic), **Groq** (free), and **xAI Grok** models.
+    Automatically calls the weather tool when the user asks about weather.
 
     **Supported models:**
     - Claude: `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`
     - Groq (free): `llama-3.3-70b-versatile` *(tool calling)*, `llama-3.1-8b-instant`,
       `mixtral-8x7b-32768`, `gemma2-9b-it`
+    - xAI Grok: `grok-2-latest` *(tool calling)*, `grok-2-mini-latest`, `grok-beta`
 
     **SSE event types:**
     - `text` — `{"chunk": "..."}` streamed token
@@ -244,14 +257,17 @@ async def chat(req: ChatRequest):
     if req.model.startswith("claude"):
         generator = _stream_claude(req)
     elif req.model.startswith(_GROQ_PREFIXES):
-        generator = _stream_groq(req)
+        generator = _stream_openai_compat(_get_groq(), req)
+    elif req.model.startswith(_XAI_PREFIXES):
+        generator = _stream_openai_compat(_get_xai(), req)
     else:
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Unknown model '{req.model}'. "
-                "Use a claude-* model or a Groq model "
-                "(llama-3.3-70b-versatile, mixtral-8x7b-32768, gemma2-9b-it, …)."
+                f"Unknown model '{req.model}'. Supported prefixes: "
+                "claude-* (Anthropic), "
+                "llama-*/mixtral-*/gemma-* (Groq), "
+                "grok-* (xAI)."
             ),
         )
 

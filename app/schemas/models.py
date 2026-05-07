@@ -16,7 +16,8 @@ class ChatRequest(BaseModel):
             "Model ID. "
             "Claude: claude-sonnet-4-6, claude-haiku-4-5-20251001. "
             "Groq (free): llama-3.3-70b-versatile, llama-3.1-8b-instant, "
-            "mixtral-8x7b-32768, gemma2-9b-it."
+            "mixtral-8x7b-32768, gemma2-9b-it. "
+            "xAI Grok: grok-2-latest, grok-2-mini-latest, grok-beta."
         ),
     )
     max_tokens: int = Field(default=1024, ge=1, le=4096)
