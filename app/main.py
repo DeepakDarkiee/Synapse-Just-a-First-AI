@@ -3,7 +3,8 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.routers import chat, extract
 
@@ -28,10 +29,13 @@ app.add_middleware(
 app.include_router(chat.router, tags=["Chat"])
 app.include_router(extract.router, tags=["Extract"])
 
+# Serve frontend static files
+app.mount("/static", StaticFiles(directory="frontend"), name="frontend")
+
 
 @app.get("/", include_in_schema=False)
 async def root():
-    return JSONResponse({"status": "ok", "docs": "/docs"})
+    return FileResponse("frontend/index.html")
 
 
 @app.get("/health", tags=["Health"])
