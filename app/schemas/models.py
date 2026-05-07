@@ -12,7 +12,12 @@ class ChatRequest(BaseModel):
     )
     model: str = Field(
         default="claude-sonnet-4-6",
-        description="Model ID. Supported: claude-sonnet-4-6, gpt-4o-mini",
+        description=(
+            "Model ID. "
+            "Claude: claude-sonnet-4-6, claude-haiku-4-5-20251001. "
+            "Groq (free): llama-3.3-70b-versatile, llama-3.1-8b-instant, "
+            "mixtral-8x7b-32768, gemma2-9b-it."
+        ),
     )
     max_tokens: int = Field(default=1024, ge=1, le=4096)
 
