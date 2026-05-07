@@ -67,21 +67,21 @@ You need at least one LLM key. Both have free tiers.
 
 ```bash
 # Clone the repo
-git clone https://github.com/<your-username>/ai-engineering-journey.git
-cd ai-engineering-journey
+git clone https://github.com/DeepakDarkiee/Synapse-Just-a-First-AI.git
+cd Synapse-Just-a-First-AI
 
-# Create a virtual environment with Python 3.13
+# Create a virtual environment (Python 3.12 or 3.13 required — see Prerequisites)
 python3.13 -m venv .venv
 
 # Activate it
 source .venv/bin/activate          # macOS / Linux
-# .venv\Scripts\activate           # Windows
+.venv\Scripts\activate             # Windows
 
 # Install all dependencies
 pip install -r requirements.txt
 ```
 
-You should see packages installing from pre-built wheels (fast, no Rust compilation).
+You should see packages installing from pre-built wheels (fast, no Rust compilation needed).
 
 ---
 
