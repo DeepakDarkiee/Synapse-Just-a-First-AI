@@ -4,6 +4,10 @@ FastAPI service with:
 - **Streaming chat** (SSE) using Claude or Groq — with automatic weather tool calling
 - **Structured extraction** — unstructured text → validated JSON via instructor + Pydantic
 
+> **Learning this project?** Read [LEARNING.md](LEARNING.md) alongside the code.
+> It explains the *why* behind every decision — SSE vs WebSockets, the two-pass tool-calling
+> pattern, how instructor works, multi-provider routing, and what to build next.
+
 ---
 
 ## Table of Contents
