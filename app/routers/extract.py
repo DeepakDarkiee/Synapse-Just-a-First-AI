@@ -2,7 +2,9 @@ import os
 from typing import Type
 
 import anthropic
+import groq as groq_sdk
 import instructor
+import openai
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -16,28 +18,62 @@ from app.schemas.models import (
 
 router = APIRouter()
 
-_instructor_client: instructor.Instructor | None = None
-
 SCHEMA_MAP: dict[str, Type[BaseModel]] = {
     "contact": ContactInfo,
-    "event": CalendarEvent,
-    "review": ProductReview,
+    "event":   CalendarEvent,
+    "review":  ProductReview,
 }
 
+# Cache one instructor client per provider (not per model)
+_clients: dict[str, instructor.Instructor] = {}
 
-def _get_instructor() -> instructor.Instructor:
-    global _instructor_client
-    if _instructor_client is None:
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
-        raw = anthropic.Anthropic(api_key=api_key)
-        _instructor_client = instructor.from_anthropic(raw)
-    return _instructor_client
+
+def _get_instructor(model: str) -> tuple[instructor.Instructor, str]:
+    """Return (instructor_client, provider) for the given model ID."""
+    if model.startswith("claude"):
+        if "anthropic" not in _clients:
+            key = os.getenv("ANTHROPIC_API_KEY")
+            if not key:
+                raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+            _clients["anthropic"] = instructor.from_anthropic(
+                anthropic.Anthropic(api_key=key)
+            )
+        return _clients["anthropic"], "anthropic"
+
+    elif model.startswith(("llama", "mixtral", "gemma", "whisper")):
+        if "groq" not in _clients:
+            key = os.getenv("GROQ_API_KEY")
+            if not key:
+                raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+            # Groq requires JSON mode for structured outputs
+            _clients["groq"] = instructor.from_groq(
+                groq_sdk.Groq(api_key=key),
+                mode=instructor.Mode.JSON,
+            )
+        return _clients["groq"], "groq"
+
+    elif model.startswith("grok"):
+        if "xai" not in _clients:
+            key = os.getenv("XAI_API_KEY")
+            if not key:
+                raise HTTPException(status_code=500, detail="XAI_API_KEY not configured")
+            _clients["xai"] = instructor.from_openai(
+                openai.OpenAI(api_key=key, base_url="https://api.x.ai/v1")
+            )
+        return _clients["xai"], "xai"
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unknown model '{model}'. Supported prefixes: "
+                "claude-* (Anthropic), llama-*/mixtral-*/gemma-* (Groq), grok-* (xAI)."
+            ),
+        )
 
 
 def _build_system_prompt(schema_type: str) -> str:
-    prompts = {
+    return {
         "contact": (
             "You are an expert at extracting structured contact information from text. "
             "Extract all available fields. Leave fields as null if not found."
@@ -52,8 +88,7 @@ def _build_system_prompt(schema_type: str) -> str:
             "Classify sentiment as positive, neutral, or negative. "
             "Extract concrete pros and cons as short bullet phrases."
         ),
-    }
-    return prompts.get(schema_type, "Extract structured information from the text.")
+    }.get(schema_type, "Extract structured information from the text.")
 
 
 @router.post("/extract", response_model=ExtractionResponse)
@@ -61,13 +96,14 @@ async def extract(req: ExtractionRequest):
     """
     Structured extraction endpoint.
 
-    Sends unstructured text to Claude via **instructor** and returns a
-    validated Pydantic object as JSON.
+    Supports **Claude**, **Groq**, and **xAI Grok** via instructor + Pydantic.
 
     **schema_type options:**
     - `contact` — name, email, phone, company, location …
     - `event` — title, date, time, duration, attendees …
     - `review` — sentiment, rating, pros, cons, summary …
+
+    **model options:** same as /chat (claude-*, llama-*/mixtral-*/gemma-*, grok-*)
     """
     if req.schema_type not in SCHEMA_MAP:
         raise HTTPException(
@@ -77,36 +113,47 @@ async def extract(req: ExtractionRequest):
         )
 
     schema_cls = SCHEMA_MAP[req.schema_type]
-    client = _get_instructor()
+    client, provider = _get_instructor(req.model)
+    system = _build_system_prompt(req.schema_type)
 
-    try:
-        result = client.chat.completions.create(
-            model="claude-sonnet-4-6",
+    # Anthropic uses a top-level `system` param; OpenAI-compat uses system message
+    if provider == "anthropic":
+        call_kwargs = dict(
+            model=req.model,
             max_tokens=1024,
-            system=_build_system_prompt(req.schema_type),
+            system=system,
             messages=[{"role": "user", "content": req.text}],
             response_model=schema_cls,
         )
+    else:
+        call_kwargs = dict(
+            model=req.model,
+            max_tokens=1024,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user",   "content": req.text},
+            ],
+            response_model=schema_cls,
+        )
+
+    try:
+        result = client.chat.completions.create(**call_kwargs)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"LLM extraction failed: {exc}") from exc
 
-    # Rough confidence heuristic: count non-null fields
     data = result.model_dump()
-    total = sum(1 for v in _flatten(data) if v is not None and v != [] and v != "")
-    possible = max(len(list(_flatten(data))), 1)
-    ratio = total / possible
+    filled = sum(1 for v in _flatten(data) if v is not None and v != [] and v != "")
+    total  = max(len(list(_flatten(data))), 1)
+    ratio  = filled / total
     confidence = "high" if ratio > 0.6 else ("medium" if ratio > 0.3 else "low")
 
     return ExtractionResponse(schema_type=req.schema_type, data=data, confidence=confidence)
 
 
-def _flatten(d, parent_key=""):
-    """Yield leaf values from a nested dict/list."""
+def _flatten(d):
     if isinstance(d, dict):
-        for v in d.values():
-            yield from _flatten(v)
+        for v in d.values():   yield from _flatten(v)
     elif isinstance(d, list):
-        for v in d:
-            yield from _flatten(v)
+        for v in d:            yield from _flatten(v)
     else:
         yield d

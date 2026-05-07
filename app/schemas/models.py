@@ -65,6 +65,15 @@ class ExtractionRequest(BaseModel):
         default="contact",
         description="What to extract: 'contact' | 'event' | 'review'",
     )
+    model: str = Field(
+        default="claude-sonnet-4-6",
+        description=(
+            "Model to use for extraction. "
+            "Claude: claude-sonnet-4-6, claude-haiku-4-5-20251001. "
+            "Groq (free): llama-3.3-70b-versatile, mixtral-8x7b-32768. "
+            "xAI Grok: grok-2-latest, grok-2-mini-latest."
+        ),
+    )
 
 
 class ExtractionResponse(BaseModel):
