@@ -1,0 +1,15 @@
+# render.yaml — Render.com deployment (alternative to Fly.io)
+# Connect your GitHub repo at https://dashboard.render.com/new/web
+
+services:
+  - type: web
+    name: ai-engineering-journey
+    env: python
+    region: singapore
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false   # set manually in Render dashboard
+    healthCheckPath: /health
